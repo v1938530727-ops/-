@@ -1,132 +1,73 @@
 name: Build Android APK
-
 on:
   push:
     branches: [ main ]
   workflow_dispatch:
-
 jobs:
   build:
     runs-on: ubuntu-latest
-    
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
-
     - name: Set up Python
       uses: actions/setup-python@v4
       with:
         python-version: '3.9'
-
     - name: Install system dependencies
       run: |
         sudo apt-get update
         sudo apt-get install -y git zip unzip openjdk-11-jdk python3-pip autoconf libtool pkg-config zlib1g-dev libncurses5-dev libncursesw5-dev cmake libffi-dev libssl-dev curl wget
-
-    - name: Set up Android environment
-      run: |
-        SDK_ROOT="$GITHUB_WORKSPACE/android-sdk"
-        mkdir -p "$SDK_ROOT"
-        echo "ANDROID_SDK_ROOT=$SDK_ROOT" >> $GITHUB_ENV
-        echo "ANDROID_HOME=$SDK_ROOT" >> $GITHUB_ENV
-        
-        # 下载命令行工具
-        wget -q https://dl.google.com/android/repository/commandlinetools-linux-8512546_latest.zip
-        
-        # 使用临时目录解压
-        mkdir -p temp_dir
-        unzip -q commandlinetools-linux-8512546_latest.zip -d temp_dir
-        
-        # 创建目标目录并移动文件
-        mkdir -p "$SDK_ROOT/cmdline-tools/latest"
-        cp -r temp_dir/cmdline-tools/* "$SDK_ROOT/cmdline-tools/latest/"
-        
-        # 清理临时目录
-        rm -rf temp_dir
-        rm -f commandlinetools-linux-8512546_latest.zip
-        
-        # 设置路径
-        echo "$SDK_ROOT/cmdline-tools/latest/bin" >> $GITHUB_PATH
-        echo "$SDK_ROOT/platform-tools" >> $GITHUB_PATH
-
-    - name: Accept Android licenses
-      run: |
-        SDK_ROOT="$GITHUB_WORKSPACE/android-sdk"
-        yes | "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --licenses || true
-
-    - name: Install Android NDK
-      run: |
-        SDK_ROOT="$GITHUB_WORKSPACE/android-sdk"
-        "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" "platform-tools" "build-tools;30.0.3" "platforms;android-30"
-        "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" "ndk;21.4.7075529"
-        echo "ANDROID_NDK_HOME=$SDK_ROOT/ndk/21.4.7075529" >> $GITHUB_ENV
-        echo "$SDK_ROOT/ndk/21.4.7075529" >> $GITHUB_PATH
-
-    - name: Install Buildozer and dependencies
+    - name: Install Buildozer
       run: |
         python -m pip install --upgrade pip
-        pip install buildozer==1.5.0
-        pip install cython==0.29.33
-        pip install python-for-android
-
-    - name: Create and configure buildozer.spec
+        pip install buildozer
+        pip install cython
+    - name: Create buildozer.spec
       run: |
-        buildozer init || true
-        if [ -f "buildozer.spec" ]; then
-          # 基础配置
-          sed -i 's|title = My Application|title = 抖音评论监控|g' buildozer.spec
-          sed -i 's|package.name = myapp|package.name = douyinmonitor|g' buildozer.spec
-          sed -i 's|package.domain = org.test|package.domain = org.douyin|g' buildozer.spec
-          sed -i 's|requirements = python3|requirements = python3,kivy|g' buildozer.spec
-          
-          # Android配置
-          sed -i 's|#android.api = 27|android.api = 30|g' buildozer.spec
-          sed -i 's|#android.minapi = 21|android.minapi = 21|g' buildozer.spec
-          sed -i 's|#android.ndk = 19b|android.ndk = 21.4.7075529|g' buildozer.spec
-          sed -i 's|#android.sdk = 20|android.sdk = 30|g' buildozer.spec
-          
-          # 添加架构配置（修复android.archs错误）
-          echo "android.archs = armeabi-v7a" >> buildozer.spec
-          
-          # 添加必要的配置
-          echo "" >> buildozer.spec
-          echo "# 解决配置令牌警告" >> buildozer.spec
-          echo "android.skip_update = True" >> buildozer.spec
-          echo "p4a.branch = develop" >> buildozer.spec
-          echo "android.accept_sdk_license = True" >> buildozer.spec
-          
-          echo "android.sdk_path = $ANDROID_SDK_ROOT" >> buildozer.spec
-          echo "android.ndk_path = $ANDROID_NDK_HOME" >> buildozer.spec
-        else
-          echo "Error: Failed to create buildozer.spec"
-          exit 1
-        fi
-
-    - name: Build APK with detailed logging
+        cat > buildozer.spec << 'EOF'
+[app]
+title = 抖音评论监控
+package.name = douyinmonitor
+package.domain = org.douyin
+source.dir = .
+source.include_exts = py,png,jpg,kv,atlas
+version = 1.0
+requirements = python3,kivy
+orientation = portrait
+[buildozer]
+log_level = 2
+[app]
+source.include_patterns = assets/*,images/*,datas/*
+android.api = 30
+android.minapi = 21
+android.ndk = 25.1.8937393
+android.archs = armeabi-v7a
+android.skip_update = True
+p4a.branch = develop
+android.accept_sdk_license = True
+android.gradle_download = True
+android.allow_backup = True
+android.wakelock = False
+presplash.filename = 
+icon.filename = 
+EOF
+    - name: Build APK
       run: |
-        echo "开始构建APK..."
-        buildozer -v android clean
-        buildozer -v android update
         buildozer -v android debug
-
-    - name: Verify build results
+    - name: Check build results
       run: |
         if [ -d "bin" ]; then
-          echo "构建产物:"
           ls -la bin/
-          apk_count=$(find bin -name "*.apk" | wc -l)
-          if [ $apk_count -gt 0 ]; then
-            echo "构建成功! 找到 $apk_count 个APK文件"
-            find bin -name "*.apk" -exec echo "APK文件: {}" \;
+          if find bin -name "*.apk" | grep -q .; then
+            echo "构建成功"
           else
-            echo "错误: 未生成APK文件"
+            echo "构建失败"
             exit 1
           fi
         else
-          echo "错误: bin目录不存在"
+          echo "bin目录不存在"
           exit 1
         fi
-
     - name: Upload APK artifact
       if: success()
       uses: actions/upload-artifact@v4
@@ -134,13 +75,3 @@ jobs:
         name: douyin-monitor-apk
         path: bin/*.apk
         retention-days: 7
-
-    - name: Upload build logs
-      if: always()
-      uses: actions/upload-artifact@v4
-      with:
-        name: build-logs
-        path: |
-          .buildozer
-          buildozer.spec
-        retention-days: 3
