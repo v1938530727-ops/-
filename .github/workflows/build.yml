@@ -18,59 +18,121 @@ jobs:
       with:
         python-version: '3.9'
 
-    - name: Install basic dependencies
+    - name: Install system dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y git zip unzip openjdk-11-jdk python3-pip
+        sudo apt-get install -y git zip unzip openjdk-11-jdk python3-pip autoconf libtool pkg-config zlib1g-dev libncurses5-dev libncursesw5-dev libtinfo5 cmake libffi-dev libssl-dev curl wget
 
-    - name: Install Buildozer
+    - name: Set up Android environment
+      run: |
+        # 设置Android SDK环境变量
+        SDK_ROOT=$GITHUB_WORKSPACE/android-sdk
+        mkdir -p $SDK_ROOT
+        echo "ANDROID_SDK_ROOT=$SDK_ROOT" >> $GITHUB_ENV
+        echo "ANDROID_HOME=$SDK_ROOT" >> $GITHUB_ENV
+        
+        # 下载命令行工具
+        wget -q https://dl.google.com/android/repository/commandlinetools-linux-8512546_latest.zip
+        unzip -q commandlinetools-linux-8512546_latest.zip -d $SDK_ROOT
+        mkdir -p $SDK_ROOT/cmdline-tools/latest
+        mv $SDK_ROOT/cmdline-tools/* $SDK_ROOT/cmdline-tools/latest/
+        
+        # 添加到PATH
+        echo "$SDK_ROOT/cmdline-tools/latest/bin" >> $GITHUB_PATH
+        echo "$SDK_ROOT/platform-tools" >> $GITHUB_PATH
+
+    - name: Accept Android licenses
+      run: |
+        yes | $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --licenses || true
+
+    - name: Install Android NDK
+      run: |
+        $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager "ndk;25.1.8937393"
+        echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/25.1.8937393" >> $GITHUB_ENV
+        echo "$ANDROID_SDK_ROOT/ndk/25.1.8937393" >> $GITHUB_PATH
+
+    - name: Install Buildozer and dependencies
       run: |
         python -m pip install --upgrade pip
         pip install buildozer
+        pip install cython==0.29.33
 
-    - name: Create minimal buildozer.spec
+    - name: Create and configure buildozer.spec
       run: |
-        cat > buildozer.spec << 'EOF'
-[app]
-title = 抖音评论监控
-package.name = douyinmonitor
-package.domain = org.douyin
-source.dir = .
-source.include_exts = py,png,jpg,kv,atlas
-version = 1.0
-requirements = python3,kivy
-orientation = portrait
-osx.python_version = 3
-osx.kivy_version = 2.1.0
-fullscreen = 0
-[buildozer]
-log_level = 2
-EOF
-
-    - name: Simple build attempt
-      run: |
-        buildozer init  # 重新初始化配置
-        buildozer android debug 2>&1 | tee build.log || echo "Build may have issues, check log"
-
-    - name: Check for APK
-      run: |
-        if [ -d "bin" ]; then
-          echo "bin目录内容:"
-          ls -la bin/
-          if ls bin/*.apk 1> /dev/null 2>&1; then
-            echo "APK文件生成成功!"
-          else
-            echo "未找到APK文件"
-          fi
+        buildozer init || true
+        if [ -f "buildozer.spec" ]; then
+          # 使用sed配置buildozer.spec
+          sed -i 's|title = My Application|title = 抖音评论监控|g' buildozer.spec
+          sed -i 's|package.name = myapp|package.name = douyinmonitor|g' buildozer.spec
+          sed -i 's|package.domain = org.test|package.domain = org.douyin|g' buildozer.spec
+          sed -i 's|requirements = python3|requirements = python3,kivy|g' buildozer.spec
+          sed -i 's|#android.api = 27|android.api = 30|g' buildozer.spec
+          sed -i 's|#android.minapi = 21|android.minapi = 21|g' buildozer.spec
+          sed -i 's|#android.ndk = 19b|android.ndk = 25.1.8937393|g' buildozer.spec
+          # 添加必要的配置
+          echo "android.sdk_path = $ANDROID_SDK_ROOT" >> buildozer.spec
+          echo "android.ndk_path = $ANDROID_NDK_HOME" >> buildozer.spec
         else
-          echo "bin目录不存在"
+          echo "Error: Failed to create buildozer.spec"
+          exit 1
         fi
 
-    - name: Upload build artifacts
+    - name: Build APK with retry mechanism
+      run: |
+        max_attempts=3
+        attempt=1
+        while [ $attempt -le $max_attempts ]; do
+          echo "Build attempt $attempt/$max_attempts"
+          if buildozer -v android debug; then
+            echo "Build successful!"
+            break
+          else
+            echo "Build failed on attempt $attempt"
+            attempt=$((attempt + 1))
+            if [ $attempt -le $max_attempts ]; then
+              echo "Waiting 10 seconds before retry..."
+              sleep 10
+              echo "Cleaning previous build..."
+              buildozer android clean || true
+            else
+              echo "All build attempts failed"
+              exit 1
+            fi
+          fi
+        done
+
+    - name: Verify build results
+      run: |
+        if [ -d "bin" ]; then
+          echo "Build artifacts found:"
+          ls -la bin/
+          apk_files=$(find bin -name "*.apk" | wc -l)
+          if [ $apk_files -gt 0 ]; then
+            echo "Success: Found $apk_files APK file(s)"
+            find bin -name "*.apk" -exec echo "APK: {}" \;
+          else
+            echo "Error: No APK files generated"
+            exit 1
+          fi
+        else
+          echo "Error: bin directory not found"
+          exit 1
+        fi
+
+    - name: Upload APK artifact
+      if: success()
       uses: actions/upload-artifact@v4
       with:
-        name: build-output
+        name: douyin-monitor-apk
+        path: bin/*.apk
+        retention-days: 7
+
+    - name: Upload build logs
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-logs
         path: |
-          bin/
-          build.log
+          .buildozer
+          buildozer.spec
         retention-days: 3
