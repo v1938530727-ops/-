@@ -37,9 +37,9 @@ jobs:
         mkdir -p temp_dir
         unzip -q commandlinetools-linux-8512546_latest.zip -d temp_dir
         
-        # 创建目标目录并移动整个cmdline-tools目录
-        mkdir -p "$SDK_ROOT/cmdline-tools"
-        mv temp_dir/cmdline-tools "$SDK_ROOT/cmdline-tools/latest"
+        # 创建目标目录并移动文件
+        mkdir -p "$SDK_ROOT/cmdline-tools/latest"
+        cp -r temp_dir/cmdline-tools/* "$SDK_ROOT/cmdline-tools/latest/"
         
         # 清理临时目录
         rm -rf temp_dir
@@ -57,27 +57,41 @@ jobs:
     - name: Install Android NDK
       run: |
         SDK_ROOT="$GITHUB_WORKSPACE/android-sdk"
-        "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" "ndk;25.1.8937393"
-        echo "ANDROID_NDK_HOME=$SDK_ROOT/ndk/25.1.8937393" >> $GITHUB_ENV
-        echo "$SDK_ROOT/ndk/25.1.8937393" >> $GITHUB_PATH
+        "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" "platform-tools" "build-tools;30.0.3" "platforms;android-30"
+        "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" "ndk;21.4.7075529"
+        echo "ANDROID_NDK_HOME=$SDK_ROOT/ndk/21.4.7075529" >> $GITHUB_ENV
+        echo "$SDK_ROOT/ndk/21.4.7075529" >> $GITHUB_PATH
 
     - name: Install Buildozer and dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install buildozer
+        pip install buildozer==1.5.0
         pip install cython==0.29.33
+        pip install python-for-android
 
     - name: Create and configure buildozer.spec
       run: |
         buildozer init || true
         if [ -f "buildozer.spec" ]; then
-          sed -i 's/title = My Application/title = 抖音评论监控/g' buildozer.spec
-          sed -i 's/package.name = myapp/package.name = douyinmonitor/g' buildozer.spec
-          sed -i 's/package.domain = org.test/package.domain = org.douyin/g' buildozer.spec
-          sed -i 's/requirements = python3/requirements = python3,kivy/g' buildozer.spec
-          sed -i 's/#android.api = 27/android.api = 30/g' buildozer.spec
-          sed -i 's/#android.minapi = 21/android.minapi = 21/g' buildozer.spec
-          sed -i 's/#android.ndk = 19b/android.ndk = 25.1.8937393/g' buildozer.spec
+          # 基础配置
+          sed -i 's|title = My Application|title = 抖音评论监控|g' buildozer.spec
+          sed -i 's|package.name = myapp|package.name = douyinmonitor|g' buildozer.spec
+          sed -i 's|package.domain = org.test|package.domain = org.douyin|g' buildozer.spec
+          sed -i 's|requirements = python3|requirements = python3,kivy|g' buildozer.spec
+          
+          # Android配置
+          sed -i 's|#android.api = 27|android.api = 30|g' buildozer.spec
+          sed -i 's|#android.minapi = 21|android.minapi = 21|g' buildozer.spec
+          sed -i 's|#android.ndk = 19b|android.ndk = 21.4.7075529|g' buildozer.spec
+          sed -i 's|#android.sdk = 20|android.sdk = 30|g' buildozer.spec
+          
+          # 添加必要的配置
+          echo "" >> buildozer.spec
+          echo "# 解决prerequisites警告" >> buildozer.spec
+          echo "android.skip_update = True" >> buildozer.spec
+          echo "p4a.branch = develop" >> buildozer.spec
+          echo "android.accept_sdk_license = True" >> buildozer.spec
+          
           echo "android.sdk_path = $ANDROID_SDK_ROOT" >> buildozer.spec
           echo "android.ndk_path = $ANDROID_NDK_HOME" >> buildozer.spec
         else
@@ -85,44 +99,28 @@ jobs:
           exit 1
         fi
 
-    - name: Build APK with retry mechanism
+    - name: Build APK with detailed logging
       run: |
-        max_attempts=3
-        attempt=1
-        while [ $attempt -le $max_attempts ]; do
-          echo "Build attempt $attempt/$max_attempts"
-          if buildozer -v android debug; then
-            echo "Build successful!"
-            break
-          else
-            echo "Build failed on attempt $attempt"
-            attempt=$((attempt + 1))
-            if [ $attempt -le $max_attempts ]; then
-              echo "Waiting 10 seconds before retry..."
-              sleep 10
-              buildozer android clean || true
-            else
-              echo "All build attempts failed"
-              exit 1
-            fi
-          fi
-        done
+        echo "开始构建APK..."
+        buildozer -v android clean
+        buildozer -v android update
+        buildozer -v android debug
 
     - name: Verify build results
       run: |
         if [ -d "bin" ]; then
-          echo "Build artifacts found:"
+          echo "构建产物:"
           ls -la bin/
-          apk_files=$(find bin -name "*.apk" | wc -l)
-          if [ $apk_files -gt 0 ]; then
-            echo "Success: Found $apk_files APK file(s)"
-            find bin -name "*.apk" -exec echo "APK: {}" \;
+          apk_count=$(find bin -name "*.apk" | wc -l)
+          if [ $apk_count -gt 0 ]; then
+            echo "构建成功! 找到 $apk_count 个APK文件"
+            find bin -name "*.apk" -exec echo "APK文件: {}" \;
           else
-            echo "Error: No APK files generated"
+            echo "错误: 未生成APK文件"
             exit 1
           fi
         else
-          echo "Error: bin directory not found"
+          echo "错误: bin目录不存在"
           exit 1
         fi
 
