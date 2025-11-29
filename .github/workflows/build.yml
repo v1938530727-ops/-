@@ -24,15 +24,15 @@ jobs:
         sudo apt-get install -y git openjdk-11-jdk python3-pip
         pip install buildozer
 
-    - name: Let Buildozer create its own config
+    - name: Skip init if spec exists
       run: |
-        buildozer init
-        # 修改基本配置
-        sed -i 's/title = My Application/title = 抖音评论监控/' buildozer.spec
-        sed -i 's/package.name = myapp/package.name = douyinmonitor/' buildozer.spec
-        sed -i 's/package.domain = org.test/package.domain = org.douyin/' buildozer.spec
+        if [ ! -f "buildozer.spec" ]; then
+          buildozer init
+        else
+          echo "buildozer.spec already exists, skipping init"
+        fi
 
-    - name: Build APK
+    - name: Build APK directly
       run: |
         buildozer -v android debug
 
