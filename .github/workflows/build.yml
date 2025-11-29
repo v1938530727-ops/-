@@ -85,9 +85,12 @@ jobs:
           sed -i 's|#android.ndk = 19b|android.ndk = 21.4.7075529|g' buildozer.spec
           sed -i 's|#android.sdk = 20|android.sdk = 30|g' buildozer.spec
           
+          # 添加架构配置（修复android.archs错误）
+          echo "android.archs = armeabi-v7a" >> buildozer.spec
+          
           # 添加必要的配置
           echo "" >> buildozer.spec
-          echo "# 解决prerequisites警告" >> buildozer.spec
+          echo "# 解决配置令牌警告" >> buildozer.spec
           echo "android.skip_update = True" >> buildozer.spec
           echo "p4a.branch = develop" >> buildozer.spec
           echo "android.accept_sdk_license = True" >> buildozer.spec
