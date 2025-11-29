@@ -18,68 +18,27 @@ jobs:
       with:
         python-version: '3.9'
 
-    - name: Install system dependencies
+    - name: Install dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y git zip unzip openjdk-11-jdk python3-pip autoconf libtool pkg-config zlib1g-dev libncurses5-dev libncursesw5-dev cmake libffi-dev libssl-dev curl wget
-
-    - name: Install Python dependencies with Cython
-      run: |
-        python -m pip install --upgrade pip
-        pip install cython==0.29.33  # 关键修复：安装指定版本的Cython
+        sudo apt-get install -y git openjdk-11-jdk python3-pip
         pip install buildozer
 
-    - name: Create buildozer.spec
+    - name: Skip init if spec exists
       run: |
-        cat > buildozer.spec << 'EOF'
-[app]
-title = 抖音评论监控
-package.name = douyinmonitor
-package.domain = org.douyin
-source.dir = .
-source.include_exts = py,png,jpg,kv,atlas
-version = 1.0
-requirements = python3,kivy,cython
-orientation = portrait
-
-[buildozer]
-log_level = 2
-
-[app]
-source.include_patterns = assets/*,images/*,datas/*
-android.api = 30
-android.minapi = 21
-android.ndk = 25.1.8937393
-android.archs = armeabi-v7a
-android.skip_update = True
-p4a.branch = develop
-android.accept_sdk_license = True
-android.gradle_download = True
-android.allow_backup = True
-android.wakelock = False
-presplash.filename = 
-icon.filename = 
-EOF
-
-    - name: Build APK
-      run: |
-        echo "开始构建APK..."
-        buildozer -v android debug
-
-    - name: Check build results
-      run: |
-        if [ -d "bin" ]; then
-          echo "构建成功! APK文件已生成"
-          ls -la bin/
+        if [ ! -f "buildozer.spec" ]; then
+          buildozer init
         else
-          echo "构建失败"
-          exit 1
+          echo "buildozer.spec already exists, skipping init"
         fi
 
-    - name: Upload APK artifact
+    - name: Build APK directly
+      run: |
+        buildozer -v android debug
+
+    - name: Upload APK
       if: success()
       uses: actions/upload-artifact@v4
       with:
-        name: douyin-monitor-apk
+        name: apk
         path: bin/*.apk
-        retention-days: 7
