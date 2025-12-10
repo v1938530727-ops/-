@@ -1,0 +1,51 @@
+import pandas as pd
+import numpy as np
+import jieba
+from wordcloud import WordCloud
+from PIL import Image
+import re  # 用于正则清理符号
+
+# -------------------------- 核心：处理首列符号 --------------------------
+# 1. 读取CSV文件
+df = pd.read_csv('data.csv')
+
+# 2. 场景1：删除多余的首列（如Unnamed: 0索引列）
+if 'Unnamed: 0' in df.columns:
+    df = df.drop(columns=['Unnamed: 0'])  # 删除首列索引列
+
+# 3. 场景2：清理首列内容中的特殊符号（如表情、标点、特殊字符）
+first_col_name = df.columns[0]  # 获取首列列名（如“昵称”）
+# 正则匹配：保留中文、字母、数字，删除所有特殊符号（可根据需求调整正则）
+df[first_col_name] = df[first_col_name].astype(str).apply(
+    lambda x: re.sub(r'[^\u4e00-\u9fa5a-zA-Z0-9]', '', x)
+)
+
+# -------------------------- 原有词云功能（保留） --------------------------
+# 获取评论内容并清理空值
+content = ' '.join([str(i) for i in df['内容'].fillna('')])
+# 分词处理
+string = ' '.join(jieba.lcut(content))
+
+# 配置词云背景图（确保python.png文件存在，或替换为自己的图片路径）
+try:
+    py = np.array(Image.open('python.png'))
+except FileNotFoundError:
+    py = None  # 无背景图时使用默认矩形
+    print("未找到python.png，使用默认矩形词云")
+
+# 词云配置
+wc = WordCloud(
+    background_color='white',
+    height=700,
+    width=1000,
+    font_path='msyh.ttc',  # 确保字体文件存在（Windows默认有，Mac需替换为'/Library/Fonts/Microsoft YaHei.ttf'）
+    stopwords={'了', '的', '是', '我', '都', '就是', '也', '有', '就', '在', '那', '啊', '真的', '只有'},
+    mask=py
+)
+
+# 生成并保存词云
+wc.generate(string)
+wc.to_file('py.png')
+
+print("首列符号清理完成，词云已生成！")
+print(f"清理后的首列前5行：\n{df[first_col_name].head()}")
